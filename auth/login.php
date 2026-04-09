@@ -1,7 +1,8 @@
 <?php
 /**
  * File: auth/login.php
- * Deskripsi: Halaman login multi-role (admin, petugas, user)
+ * Deskripsi: Halaman login multi-role dengan redirect setelah login
+ * Fitur: Guest browsing + Auto redirect ke halaman yang diminta + Support MD5/Hash
  */
 
 session_start();
@@ -19,13 +20,31 @@ if (isset($_SESSION['login']) && $_SESSION['login'] === true) {
             header('Location: ../petugas/dashboard.php');
             break;
         case 'user':
-            header('Location: ../user/dashboard.php');
+            // ✅ FIX: Cek apakah ada redirect URL dari guest browsing
+            $redirect = isset($_GET['redirect']) ? $_GET['redirect'] : '../user/dashboard.php';
+            // Validasi redirect URL (hanya izinkan internal)
+            if (isValidRedirect($redirect)) {
+                header('Location: ' . $redirect);
+            } else {
+                header('Location: ../user/dashboard.php');
+            }
             break;
         default:
             session_destroy();
             header('Location: login.php');
     }
     exit();
+}
+
+// ✅ FIX: Function validasi redirect URL (mencegah open redirect attack)
+function isValidRedirect($url) {
+    // Izinkan hanya URL relatif/internal
+    if (empty($url)) return false;
+    if (strpos($url, 'http') === 0) return false; // Blokir URL absolut
+    if (strpos($url, '..') !== false) return false; // Blokir path traversal
+    if (strpos($url, '//') !== false) return false; // Blokir protocol-relative
+    // Izinkan hanya file .php di folder yang valid
+    return preg_match('/^[a-z0-9_\/\.\?\=\&\-]+\.php$/i', $url);
 }
 
 // Proses login
@@ -45,19 +64,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($result->num_rows === 1) {
             $row = $result->fetch_assoc();
             
-            // Cek password (MD5 sesuai database Anda)
-            $password_hash = md5($password);
+            // ✅ FIX: Cek password dengan fallback MD5 dan password_hash
+            $password_valid = false;
             
-            if ($password_hash === $row['password']) {
+            // Coba password_verify dulu (untuk password yang di-hash dengan password_hash)
+            if (password_verify($password, $row['password'])) {
+                $password_valid = true;
+            } 
+            // Fallback ke MD5 (untuk password lama yang masih pakai md5)
+            elseif (md5($password) === $row['password']) {
+                $password_valid = true;
+                // Optional: Upgrade password ke hash yang lebih aman
+                // $new_hash = password_hash($password, PASSWORD_DEFAULT);
+                // mysqli_query($koneksi, "UPDATE users SET password='$new_hash' WHERE id={$row['id']}");
+            }
+            
+            if ($password_valid) {
                 // Set session dengan benar
                 $_SESSION['login'] = true;
                 $_SESSION['id'] = $row['id'];
                 $_SESSION['username'] = $row['username'];
                 $_SESSION['nama'] = $row['nama_lengkap'] ?? $row['username'];
-                $_SESSION['role'] = $row['role']; // Pastikan ini tersimpan
-                
-                // Debug: Cek role yang tersimpan
-                // echo "Role: " . $_SESSION['role']; exit();
+                $_SESSION['role'] = $row['role'];
                 
                 // Redirect berdasarkan role
                 switch ($row['role']) {
@@ -68,7 +96,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         header('Location: ../petugas/dashboard.php');
                         break;
                     case 'user':
-                        header('Location: ../user/dashboard.php');
+                        // ✅ FIX: Redirect ke URL yang diminta guest (jika valid)
+                        $redirect = isset($_GET['redirect']) ? $_GET['redirect'] : '../user/dashboard.php';
+                        if (isValidRedirect($redirect)) {
+                            header('Location: ' . $redirect);
+                        } else {
+                            header('Location: ../user/dashboard.php');
+                        }
                         break;
                     default:
                         session_destroy();

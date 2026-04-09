@@ -2,197 +2,471 @@
 session_start();
 include '../config.php';
 
-// Cek sesi petugas
 if (!isset($_SESSION['login']) || $_SESSION['role'] !== 'petugas') {
-    header("Location: ../auth/login.php");
-    exit();
+    header("Location: ../auth/login.php"); exit();
 }
 
-// Hitung statistik sederhana
-$total_produk = mysqli_fetch_assoc(mysqli_query($koneksi, "SELECT COUNT(*) as count FROM produk"))['count'];
-$total_transaksi = mysqli_fetch_assoc(mysqli_query($koneksi, "SELECT COUNT(*) as count FROM transaksi"))['count'];
-$total_pendapatan = mysqli_fetch_assoc(mysqli_query($koneksi, "SELECT SUM(total_harga) as count FROM transaksi"))['count'] ?? 0;
+// Statistik
+$total_produk = mysqli_fetch_assoc(mysqli_query($koneksi, "SELECT COUNT(*) as c FROM products"))['c'] ?? 0;
+$total_transaksi = mysqli_fetch_assoc(mysqli_query($koneksi, "SELECT COUNT(*) as c FROM orders"))['c'] ?? 0;
+$total_pending = mysqli_fetch_assoc(mysqli_query($koneksi, "SELECT COUNT(*) as c FROM orders WHERE status = 'pending'"))['c'] ?? 0;
+$total_pendapatan = mysqli_fetch_assoc(mysqli_query($koneksi, "SELECT COALESCE(SUM(total_bayar), 0) as c FROM orders WHERE status = 'paid'"))['c'] ?? 0;
+
+$recent_orders = mysqli_query($koneksi, "SELECT o.*, u.nama_lengkap FROM orders o LEFT JOIN users u ON o.user_id = u.id ORDER BY o.tanggal_transaksi DESC LIMIT 5");
 ?>
 <!DOCTYPE html>
 <html lang="id">
 <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Dashboard Petugas</title>
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" />
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard Petugas - MasElektro</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
-        :root { --primary: #2563eb; --bg-body: #f1f5f9; --bg-sidebar: #1e293b; --text-light: #f8fafc; --text-dark: #0f172a; }
-        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Inter', sans-serif; }
-        body { background-color: var(--bg-body); display: flex; min-height: 100vh; overflow-x: hidden; }
-        a { text-decoration: none; }
+        :root {
+            --primary: #2563eb;
+            --primary-dark: #1d4ed8;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --dark: #1e293b;
+            --light: #f8fafc;
+            --gray: #64748b;
+            --border: #e2e8f0;
+            --shadow: 0 1px 3px rgba(0,0,0,0.1);
+            --shadow-lg: 0 10px 15px rgba(0,0,0,0.1);
+        }
         
-        .sidebar { width: 280px; background-color: var(--bg-sidebar); position: fixed; top: 0; left: 0; height: 100vh; display: flex; flex-direction: column; transition: transform 0.3s; z-index: 1000; box-shadow: 4px 0 10px rgba(0,0,0,0.1); }
-        .sidebar-header { padding: 24px; border-bottom: 1px solid rgba(255,255,255,0.1); display: flex; align-items: center; gap: 12px; }
-        .brand-logo { width: 32px; height: 32px; background: var(--primary); border-radius: 8px; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; }
-        .sidebar-title { font-size: 20px; font-weight: 700; color: var(--text-light); }
-        .sidebar-menu { padding: 20px 15px; flex: 1; overflow-y: auto; }
-        .menu-item { display: flex; align-items: center; padding: 12px 16px; color: #94a3b8; font-size: 15px; font-weight: 500; border-radius: 8px; margin-bottom: 4px; transition: all 0.2s; cursor: pointer; }
-        .menu-item:hover { background-color: rgba(255,255,255,0.05); color: var(--text-light); }
-        .menu-item.active { background-color: var(--primary); color: white; box-shadow: 0 4px 6px -1px rgba(37, 99, 235, 0.4); }
-        .menu-item i { width: 24px; margin-right: 10px; text-align: center; }
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Inter', sans-serif; }
+        body { background: #f1f5f9; color: var(--dark); }
         
-        /* Dropdown */
-        .dropdown-toggle { justify-content: space-between; }
-        .dropdown-toggle::after { content: '\f107'; font-family: 'Font Awesome 6 Free'; font-weight: 900; border: none; transition: transform 0.3s; }
-        .dropdown-toggle.active::after { transform: rotate(180deg); }
-        .dropdown-menu { max-height: 0; overflow: hidden; transition: max-height 0.3s ease-out; padding-left: 10px; }
-        .dropdown-menu.show { max-height: 500px; padding-top: 5px; }
-        .dropdown-item { display: flex; align-items: center; padding: 10px 16px 10px 40px; color: #94a3b8; font-size: 14px; border-radius: 6px; margin-bottom: 2px; }
-        .dropdown-item:hover { background-color: rgba(255,255,255,0.05); color: var(--text-light); }
-        .dropdown-item.active { background-color: rgba(37, 99, 235, 0.2); color: var(--primary); font-weight: 600; }
-        .dropdown-item i { width: 20px; margin-right: 8px; font-size: 12px; }
-        .dropdown-item.disabled { opacity: 0.5; cursor: not-allowed; }
-        .dropdown-item.disabled:hover { background-color: transparent; color: #94a3b8; }
+        .wrapper { display: flex; min-height: 100vh; }
         
-        .sidebar-footer { padding: 20px; border-top: 1px solid rgba(255,255,255,0.1); }
-        .logout-btn { display: flex; align-items: center; color: #fca5a5; font-weight: 600; transition: color 0.2s; }
-        .logout-btn:hover { color: #ef4444; }
-        .logout-btn i { margin-right: 10px; font-size: 18px; }
-
-        .main-content { margin-left: 280px; flex: 1; padding: 30px; transition: margin-left 0.3s; }
-        .page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; }
-        .page-title { font-size: 28px; font-weight: 700; color: var(--text-dark); }
-        .mobile-toggle { display: none; font-size: 24px; color: var(--text-dark); cursor: pointer; background: none; border: none; }
-
-        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 20px; margin-bottom: 30px; }
-        .stat-card { background: white; padding: 24px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); border: 1px solid #e2e8f0; display: flex; align-items: center; gap: 20px; }
-        .stat-icon { width: 50px; height: 50px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 24px; }
-        .stat-info h3 { font-size: 24px; font-weight: 700; color: var(--text-dark); margin-bottom: 4px; }
-        .stat-info p { font-size: 14px; color: #64748b; }
+        /* Sidebar */
+        .sidebar {
+            width: 280px;
+            background: var(--dark);
+            position: fixed;
+            left: 0;
+            top: 0;
+            height: 100vh;
+            overflow-y: auto;
+            z-index: 1000;
+            box-shadow: 4px 0 10px rgba(0,0,0,0.1);
+        }
         
-        .bg-blue { background: #eff6ff; color: #2563eb; }
-        .bg-green { background: #f0fdf4; color: #10b981; }
-        .bg-purple { background: #f5f3ff; color: #8b5cf6; }
-
+        .sidebar-header {
+            padding: 24px 20px;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        
+        .brand-icon {
+            width: 40px;
+            height: 40px;
+            background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: 700;
+            font-size: 20px;
+        }
+        
+        .brand-text {
+            color: white;
+            font-size: 20px;
+            font-weight: 700;
+        }
+        
+        .sidebar-menu { padding: 20px 15px; }
+        
+        .menu-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 14px 16px;
+            color: #94a3b8;
+            text-decoration: none;
+            border-radius: 10px;
+            margin-bottom: 6px;
+            transition: all 0.3s;
+            font-weight: 500;
+        }
+        
+        .menu-item:hover {
+            background: rgba(255,255,255,0.05);
+            color: white;
+        }
+        
+        .menu-item.active {
+            background: var(--primary);
+            color: white;
+            box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+        }
+        
+        .menu-item i { width: 20px; text-align: center; font-size: 16px; }
+        
+        .sidebar-footer {
+            padding: 20px;
+            border-top: 1px solid rgba(255,255,255,0.1);
+            margin-top: auto;
+        }
+        
+        .logout {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            color: #fca5a5;
+            text-decoration: none;
+            padding: 12px;
+            border-radius: 10px;
+            transition: all 0.3s;
+        }
+        
+        .logout:hover {
+            background: rgba(239, 68, 68, 0.1);
+            color: var(--danger);
+        }
+        
+        /* Main Content */
+        .main-content {
+            margin-left: 280px;
+            flex: 1;
+            padding: 30px;
+        }
+        
+        .page-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+        
+        .page-title {
+            font-size: 28px;
+            font-weight: 700;
+            color: var(--dark);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        
+        .page-title i { color: var(--primary); }
+        
+        /* Stats Grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .stat-card {
+            background: white;
+            padding: 24px;
+            border-radius: 12px;
+            box-shadow: var(--shadow);
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            transition: transform 0.3s;
+        }
+        
+        .stat-card:hover {
+            transform: translateY(-5px);
+            box-shadow: var(--shadow-lg);
+        }
+        
+        .stat-icon {
+            width: 60px;
+            height: 60px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+        }
+        
+        .stat-icon.blue { background: #eff6ff; color: var(--primary); }
+        .stat-icon.green { background: #f0fdf4; color: var(--success); }
+        .stat-icon.yellow { background: #fef3c7; color: var(--warning); }
+        .stat-icon.purple { background: #f5f3ff; color: #8b5cf6; }
+        
+        .stat-info h3 {
+            font-size: 28px;
+            font-weight: 700;
+            color: var(--dark);
+            margin-bottom: 4px;
+        }
+        
+        .stat-info p {
+            font-size: 14px;
+            color: var(--gray);
+            font-weight: 500;
+        }
+        
+        /* Content Grid */
+        .content-grid {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 20px;
+        }
+        
+        .card {
+            background: white;
+            border-radius: 12px;
+            box-shadow: var(--shadow);
+            overflow: hidden;
+        }
+        
+        .card-header {
+            padding: 20px 24px;
+            border-bottom: 2px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .card-title {
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--dark);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .card-body { padding: 24px; }
+        
+        /* Table */
+        .table-responsive { overflow-x: auto; }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        
+        thead { background: #f8fafc; }
+        
+        th {
+            padding: 14px 20px;
+            text-align: left;
+            font-size: 13px;
+            font-weight: 700;
+            color: var(--gray);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        td {
+            padding: 16px 20px;
+            font-size: 14px;
+            border-bottom: 1px solid var(--border);
+        }
+        
+        tr:hover { background: #f8fafc; }
+        
+        .badge {
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: 600;
+            display: inline-block;
+        }
+        
+        .badge-pending { background: #fef3c7; color: #92400e; }
+        .badge-paid { background: #dbeafe; color: #1e40af; }
+        .badge-selesai { background: #d1fae5; color: #065f46; }
+        
+        .btn {
+            padding: 8px 16px;
+            border-radius: 8px;
+            border: none;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .btn-primary {
+            background: var(--primary);
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background: var(--primary-dark);
+            transform: translateY(-2px);
+        }
+        
         @media (max-width: 1024px) {
             .sidebar { transform: translateX(-100%); }
             .sidebar.active { transform: translateX(0); }
             .main-content { margin-left: 0; }
-            .mobile-toggle { display: block; }
+            .content-grid { grid-template-columns: 1fr; }
         }
     </style>
 </head>
 <body>
-
-    <div class="sidebar" id="sidebar">
-        <div class="sidebar-header">
-            <div class="brand-logo"><i class="fas fa-user-tag"></i></div>
-            <div class="sidebar-title">Petugas Panel</div>
-        </div>
-        
-        <div class="sidebar-menu">
-            <a href="dashboard.php" class="menu-item active">
-                <i class="fas fa-chart-pie"></i> Dashboard
-            </a>
-            
-            <!-- Dropdown Menu -->
-            <div class="menu-item dropdown-toggle active" onclick="toggleDropdown()">
-                <span><i class="fas fa-folder-open"></i> Kelola Data</span>
+    <div class="wrapper">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="brand-icon">M</div>
+                <div class="brand-text">Petugas Panel</div>
             </div>
-            <div class="dropdown-menu show" id="dropdownMenu">
-                <a href="kelola_data_user.php" class="dropdown-item">
-                    <i class="fas fa-user"></i> Kelola Data User
+            
+            <nav class="sidebar-menu">
+                <a href="dashboard.php" class="menu-item active">
+                    <i class="fas fa-chart-pie"></i> Dashboard
                 </a>
-                <a href="kelola_data_produk.php" class="dropdown-item">
-                    <i class="fas fa-box"></i> Kelola Data Produk
+                <a href="kelola_pesanan.php" class="menu-item">
+                    <i class="fas fa-shopping-bag"></i> Kelola Pesanan
                 </a>
-                <a href="kelola_data_transaksi.php" class="dropdown-item">
-                    <i class="fas fa-receipt"></i> Kelola Data Transaksi
+                <a href="kelola_data_user.php" class="menu-item">
+                    <i class="fas fa-users"></i> Kelola User
                 </a>
-                <a href="laporan.php" class="dropdown-item">
+                <a href="kelola_data_produk.php" class="menu-item">
+                    <i class="fas fa-box-open"></i> Kelola Produk
+                </a>
+                <a href="laporan.php" class="menu-item">
                     <i class="fas fa-file-alt"></i> Laporan
                 </a>
-                <!-- Menu Admin Only (Disabled untuk Petugas) -->
-                <a href="#" class="dropdown-item disabled" title="Hanya untuk Admin">
-                    <i class="fas fa-download"></i> Backup Data <i class="fas fa-lock" style="margin-left: auto; font-size: 10px;"></i>
+            </nav>
+            
+            <div class="sidebar-footer">
+                <a href="../auth/logout.php" class="logout">
+                    <i class="fas fa-sign-out-alt"></i> Logout
                 </a>
-                <a href="#" class="dropdown-item disabled" title="Hanya untuk Admin">
-                    <i class="fas fa-upload"></i> Restore Data <i class="fas fa-lock" style="margin-left: auto; font-size: 10px;"></i>
-                </a>
             </div>
-        </div>
+        </aside>
 
-        <div class="sidebar-footer">
-            <a href="../auth/logout.php" class="logout-btn">
-                <i class="fas fa-sign-out-alt"></i> Logout
-            </a>
-        </div>
+        <!-- Main Content -->
+        <main class="main-content">
+            <div class="page-header">
+                <h1 class="page-title">
+                    <i class="fas fa-home"></i>
+                    Dashboard
+                </h1>
+                <div style="color: var(--gray);">
+                    <i class="fas fa-calendar"></i> <?= date('d F Y') ?>
+                </div>
+            </div>
+            
+            <!-- Stats Grid -->
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-icon blue">
+                        <i class="fas fa-box"></i>
+                    </div>
+                    <div class="stat-info">
+                        <h3><?= number_format($total_produk) ?></h3>
+                        <p>Total Produk</p>
+                    </div>
+                </div>
+                
+                <div class="stat-card">
+                    <div class="stat-icon green">
+                        <i class="fas fa-shopping-cart"></i>
+                    </div>
+                    <div class="stat-info">
+                        <h3><?= number_format($total_transaksi) ?></h3>
+                        <p>Total Transaksi</p>
+                    </div>
+                </div>
+                
+                <div class="stat-card">
+                    <div class="stat-icon yellow">
+                        <i class="fas fa-clock"></i>
+                    </div>
+                    <div class="stat-info">
+                        <h3><?= number_format($total_pending) ?></h3>
+                        <p>Menunggu Konfirmasi</p>
+                    </div>
+                </div>
+                
+                <div class="stat-card">
+                    <div class="stat-icon purple">
+                        <i class="fas fa-wallet"></i>
+                    </div>
+                    <div class="stat-info">
+                        <h3>Rp <?= number_format($total_pendapatan, 0, ',', '.') ?></h3>
+                        <p>Total Pendapatan</p>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Content Grid -->
+            <div class="content-grid">
+                <!-- Recent Orders -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">
+                            <i class="fas fa-clock" style="color: var(--warning);"></i>
+                            Pesanan Terbaru
+                        </h3>
+                        <a href="kelola_pesanan.php" class="btn btn-primary">
+                            Lihat Semua <i class="fas fa-arrow-right"></i>
+                        </a>
+                    </div>
+                    <div class="card-body" style="padding: 0;">
+                        <div class="table-responsive">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Order ID</th>
+                                        <th>Pelanggan</th>
+                                        <th>Tanggal</th>
+                                        <th>Total</th>
+                                        <th>Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php while($o = mysqli_fetch_assoc($recent_orders)): ?>
+                                    <tr>
+                                        <td><strong>#<?= str_pad($o['id'], 6, '0', STR_PAD_LEFT) ?></strong></td>
+                                        <td><?= htmlspecialchars($o['nama_lengkap'] ?? 'Guest') ?></td>
+                                        <td><?= date('d M Y', strtotime($o['tanggal_transaksi'])) ?></td>
+                                        <td><strong>Rp <?= number_format($o['total_bayar'], 0, ',', '.') ?></strong></td>
+                                        <td><span class="badge badge-<?= $o['status'] ?>"><?= $o['status'] ?></span></td>
+                                    </tr>
+                                    <?php endwhile; ?>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Quick Actions -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">
+                            <i class="fas fa-bolt" style="color: var(--warning);"></i>
+                            Aksi Cepat
+                        </h3>
+                    </div>
+                    <div class="card-body">
+                        <a href="kelola_pesanan.php" class="btn btn-primary" style="width: 100%; margin-bottom: 10px; justify-content: center;">
+                            <i class="fas fa-check-circle"></i> Konfirmasi Pesanan
+                        </a>
+                        <a href="kelola_data_produk.php" class="btn btn-primary" style="width: 100%; margin-bottom: 10px; background: var(--success); justify-content: center;">
+                            <i class="fas fa-plus"></i> Tambah Produk
+                        </a>
+                        <a href="laporan.php" class="btn btn-primary" style="width: 100%; background: var(--warning); justify-content: center;">
+                            <i class="fas fa-file-alt"></i> Lihat Laporan
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </main>
     </div>
-
-    <div class="main-content">
-        <div class="page-header">
-            <button class="mobile-toggle" onclick="toggleSidebar()">
-                <i class="fas fa-bars"></i>
-            </button>
-            <h1 class="page-title">Dashboard Petugas</h1>
-            <div style="width: 24px;"></div>
-        </div>
-
-        <div class="stats-grid">
-            <div class="stat-card">
-                <div class="stat-icon bg-blue"><i class="fas fa-box"></i></div>
-                <div class="stat-info">
-                    <h3><?= $total_produk ?></h3>
-                    <p>Total Produk</p>
-                </div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-icon bg-green"><i class="fas fa-shopping-cart"></i></div>
-                <div class="stat-info">
-                    <h3><?= $total_transaksi ?></h3>
-                    <p>Total Transaksi</p>
-                </div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-icon bg-purple"><i class="fas fa-wallet"></i></div>
-                <div class="stat-info">
-                    <h3>Rp <?= number_format($total_pendapatan, 0, ',', '.') ?></h3>
-                    <p>Total Pendapatan</p>
-                </div>
-            </div>
-        </div>
-
-        <div style="background: white; padding: 30px; border-radius: 12px; border: 1px solid #e2e8f0;">
-            <h3 style="margin-bottom: 15px; color: var(--text-dark);">Selamat Datang, <?= htmlspecialchars($_SESSION['nama']) ?>! 👋</h3>
-            <p style="color: #64748b; line-height: 1.6;">Silakan gunakan menu di samping untuk mengelola transaksi dan melihat laporan stok. 
-            <br><strong>⚠️ Catatan:</strong> Menu Backup & Restore hanya dapat diakses oleh Admin.</p>
-        </div>
-    </div>
-
-    <script>
-        function toggleSidebar() {
-            document.getElementById('sidebar').classList.toggle('active');
-        }
-
-        function toggleDropdown() {
-            const dropdown = document.getElementById('dropdownMenu');
-            const toggle = document.querySelector('.dropdown-toggle');
-            dropdown.classList.toggle('show');
-            toggle.classList.toggle('active');
-        }
-
-        // Auto expand dropdown if active item is inside
-        document.addEventListener('DOMContentLoaded', function() {
-            const activeDropdownItem = document.querySelector('.dropdown-item.active');
-            if (activeDropdownItem) {
-                document.getElementById('dropdownMenu').classList.add('show');
-                document.querySelector('.dropdown-toggle').classList.add('active');
-            }
-        });
-
-        // Prevent clicking disabled items
-        document.querySelectorAll('.dropdown-item.disabled').forEach(item => {
-            item.addEventListener('click', function(e) {
-                e.preventDefault();
-                alert('⛔ Akses Ditolak!\n\nFitur ini hanya tersedia untuk Admin.');
-            });
-        });
-    </script>
 </body>
 </html>

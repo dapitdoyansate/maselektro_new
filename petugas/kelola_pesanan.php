@@ -7,17 +7,29 @@ if (!isset($_SESSION['login']) || $_SESSION['role'] !== 'petugas') {
     header("Location: ../auth/login.php"); exit();
 }
 
-// ✅ HITUNG TOTAL TRANSAKSI
-$total_transaksi = mysqli_fetch_assoc(mysqli_query($koneksi, "SELECT COUNT(*) as c FROM orders"))['c'] ?? 0;
+// ✅ PROSES ACC / TOLAK PESANAN
+if (isset($_POST['aksi'])) {
+    $id = (int)$_POST['id'];
+    $aksi = $_POST['aksi'];
 
-// ✅ HITUNG TOTAL PENDAPATAN (HANYA YANG SUDAH DIBAYAR/PAID)
-$pendapatan = mysqli_fetch_assoc(mysqli_query($koneksi, "
-    SELECT COALESCE(SUM(total_bayar), 0) as total 
-    FROM orders 
-    WHERE status = 'paid'
-"))['total'] ?? 0;
+    if ($aksi == 'acc') {
+        // Ubah status jadi 'paid' (Sudah Dibayar)
+        mysqli_query($koneksi, "UPDATE orders SET status = 'paid' WHERE id = $id");
+        $pesan = "✅ Pesanan #$id berhasil dikonfirmasi (Sudah Dibayar)!";
+    } elseif ($aksi == 'tolak') {
+        // Ubah status jadi 'dibatalkan'
+        mysqli_query($koneksi, "UPDATE orders SET status = 'dibatalkan' WHERE id = $id");
+        
+        // Kembalikan stok barang
+        $items = mysqli_query($koneksi, "SELECT product_id, quantity FROM order_details WHERE order_id = $id");
+        while($item = mysqli_fetch_assoc($items)) {
+            mysqli_query($koneksi, "UPDATE products SET stok = stok + {$item['quantity']} WHERE id = {$item['product_id']}");
+        }
+        $pesan = "❌ Pesanan #$id dibatalkan & stok dikembalikan.";
+    }
+}
 
-// ✅ AMBIL SEMUA DATA TRANSAKSI
+// Ambil Data Pesanan
 $orders = mysqli_query($koneksi, "
     SELECT o.*, u.nama_lengkap 
     FROM orders o 
@@ -30,21 +42,22 @@ $orders = mysqli_query($koneksi, "
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Laporan Transaksi - Petugas Panel</title>
+    <title>Kelola Pesanan - Petugas Panel</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
         :root {
             --primary: #2563eb; --primary-dark: #1d4ed8; --success: #10b981;
-            --danger: #ef4444; --dark: #1e293b; --gray: #64748b; --border: #e2e8f0;
-            --shadow: 0 1px 3px rgba(0,0,0,0.1);
+            --warning: #f59e0b; --danger: #ef4444; --dark: #1e293b;
+            --light: #f8fafc; --gray: #64748b; --border: #e2e8f0;
+            --shadow: 0 1px 3px rgba(0,0,0,0.1); --shadow-lg: 0 10px 15px rgba(0,0,0,0.1);
         }
         * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Inter', sans-serif; }
         body { background: #f1f5f9; color: var(--dark); }
         .wrapper { display: flex; min-height: 100vh; }
         
-        /* Sidebar */
-        .sidebar { width: 280px; background: var(--dark); position: fixed; left: 0; top: 0; height: 100vh; overflow-y: auto; }
+        /* Sidebar Fix */
+        .sidebar { width: 280px; background: var(--dark); position: fixed; left: 0; top: 0; height: 100vh; overflow-y: auto; z-index: 1000; }
         .sidebar-header { padding: 24px 20px; border-bottom: 1px solid rgba(255,255,255,0.1); display: flex; align-items: center; gap: 12px; }
         .brand-icon { width: 40px; height: 40px; background: linear-gradient(135deg, var(--primary), var(--primary-dark)); border-radius: 10px; display: flex; align-items: center; justify-content: center; color: white; font-weight: 700; font-size: 20px; }
         .brand-text { color: white; font-size: 20px; font-weight: 700; }
@@ -63,24 +76,19 @@ $orders = mysqli_query($koneksi, "
         .page-title { font-size: 28px; font-weight: 700; display: flex; align-items: center; gap: 12px; }
         .page-title i { color: var(--primary); }
         
-        /* Stats Grid */
-        .stats-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; margin-bottom: 30px; }
-        .stat-card { background: white; padding: 24px; border-radius: 12px; box-shadow: var(--shadow); display: flex; align-items: center; gap: 20px; }
-        .stat-icon { width: 60px; height: 60px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 24px; }
-        .stat-icon.blue { background: #eff6ff; color: var(--primary); }
-        .stat-icon.green { background: #f0fdf4; color: var(--success); }
-        .stat-info h3 { font-size: 28px; font-weight: 700; color: var(--dark); margin-bottom: 4px; }
-        .stat-info p { font-size: 14px; color: var(--gray); font-weight: 500; }
-        
         /* Card & Table */
         .card { background: white; border-radius: 12px; box-shadow: var(--shadow); overflow: hidden; }
         .card-header { padding: 20px 24px; border-bottom: 2px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
         .card-title { font-size: 18px; font-weight: 700; display: flex; align-items: center; gap: 10px; }
         
+        .alert { padding: 15px 20px; border-radius: 8px; margin-bottom: 20px; font-weight: 500; }
+        .alert-success { background: #d1fae5; color: #065f46; border-left: 4px solid var(--success); }
+        .alert-error { background: #fee2e2; color: #991b1b; border-left: 4px solid var(--danger); }
+        
         table { width: 100%; border-collapse: collapse; }
         thead { background: #f8fafc; }
         th { padding: 16px 20px; text-align: left; font-size: 13px; font-weight: 700; color: var(--gray); text-transform: uppercase; letter-spacing: 0.5px; }
-        td { padding: 16px 20px; font-size: 14px; border-bottom: 1px solid var(--border); }
+        td { padding: 16px 20px; font-size: 14px; border-bottom: 1px solid var(--border); vertical-align: middle; }
         tr:hover { background: #f8fafc; }
         
         .badge { padding: 6px 12px; border-radius: 20px; font-size: 11px; font-weight: 600; display: inline-block; }
@@ -89,26 +97,22 @@ $orders = mysqli_query($koneksi, "
         .badge-selesai { background: #d1fae5; color: #065f46; }
         .badge-dibatalkan { background: #fee2e2; color: #991b1b; }
         
-        .btn { padding: 10px 20px; border-radius: 8px; border: none; font-weight: 600; cursor: pointer; transition: 0.2s; display: inline-flex; align-items: center; gap: 8px; }
-        .btn-print { background: white; border: 2px solid var(--primary); color: var(--primary); }
-        .btn-print:hover { background: var(--primary); color: white; }
-        
-        @media print {
-            .sidebar, .btn-print { display: none; }
-            .main-content { margin-left: 0; padding: 0; }
-        }
+        .btn { padding: 8px 16px; border-radius: 6px; border: none; font-size: 13px; font-weight: 600; cursor: pointer; transition: 0.2s; }
+        .btn-acc { background: #10b981; color: white; }
+        .btn-acc:hover { background: #059669; }
+        .btn-tolak { background: #ef4444; color: white; margin-left: 5px; }
+        .btn-tolak:hover { background: #dc2626; }
         
         @media (max-width: 1024px) {
             .sidebar { transform: translateX(-100%); }
             .sidebar.active { transform: translateX(0); }
             .main-content { margin-left: 0; }
-            .stats-grid { grid-template-columns: 1fr; }
         }
     </style>
 </head>
 <body>
     <div class="wrapper">
-        <!-- SIDEBAR -->
+        <!-- ✅ SIDEBAR YANG SUDAH DIPERBAIKI -->
         <aside class="sidebar">
             <div class="sidebar-header">
                 <div class="brand-icon">M</div>
@@ -138,53 +142,31 @@ $orders = mysqli_query($koneksi, "
             </div>
         </aside>
 
-        <!-- MAIN CONTENT -->
+        <!-- Main Content -->
         <main class="main-content">
             <div class="page-header">
-                <h1 class="page-title"><i class="fas fa-file-alt"></i> Laporan Transaksi</h1>
-                <button onclick="window.print()" class="btn btn-print">
-                    <i class="fas fa-print"></i> Cetak Laporan
-                </button>
+                <h1 class="page-title"><i class="fas fa-shopping-bag"></i> Kelola Pesanan</h1>
             </div>
             
-            <!-- Stats Cards -->
-            <div class="stats-grid">
-                <div class="stat-card">
-                    <div class="stat-icon blue">
-                        <i class="fas fa-shopping-cart"></i>
-                    </div>
-                    <div class="stat-info">
-                        <h3><?= number_format($total_transaksi) ?></h3>
-                        <p>Total Transaksi</p>
-                    </div>
-                </div>
-                
-                <div class="stat-card">
-                    <div class="stat-icon green">
-                        <i class="fas fa-wallet"></i>
-                    </div>
-                    <div class="stat-info">
-                        <h3>Rp <?= number_format($pendapatan, 0, ',', '.') ?></h3>
-                        <p>Total Pendapatan (ACC)</p>
-                    </div>
-                </div>
-            </div>
+            <?php if(isset($pesan)): ?>
+                <div class="alert alert-success"><?= $pesan ?></div>
+            <?php endif; ?>
             
-            <!-- Table -->
             <div class="card">
                 <div class="card-header">
-                    <h3 class="card-title"><i class="fas fa-list"></i> Riwayat Semua Transaksi</h3>
+                    <h3 class="card-title"><i class="fas fa-list"></i> Daftar Semua Pesanan</h3>
                 </div>
                 <div style="overflow-x: auto;">
                     <table>
                         <thead>
                             <tr>
                                 <th>Order ID</th>
-                                <th>Tanggal</th>
                                 <th>Pelanggan</th>
+                                <th>Tanggal</th>
                                 <th>Total</th>
                                 <th>Metode</th>
                                 <th>Status</th>
+                                <th>Aksi</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -193,11 +175,29 @@ $orders = mysqli_query($koneksi, "
                             ?>
                             <tr>
                                 <td><strong>#<?= str_pad($o['id'], 6, '0', STR_PAD_LEFT) ?></strong></td>
+                                <td>
+                                    <div style="font-weight: 600;"><?= htmlspecialchars($o['nama_lengkap'] ?? 'Guest') ?></div>
+                                    <small style="color: var(--gray);"><?= htmlspecialchars($o['no_telp'] ?? '') ?></small>
+                                </td>
                                 <td><?= date('d M Y H:i', strtotime($o['tanggal_transaksi'])) ?></td>
-                                <td><?= htmlspecialchars($o['nama_lengkap'] ?? 'Guest') ?></td>
                                 <td><strong style="color: var(--primary);">Rp <?= number_format($o['total_bayar'], 0, ',', '.') ?></strong></td>
                                 <td><?= htmlspecialchars($o['metode_pembayaran']) ?></td>
                                 <td><span class="badge <?= $badge_class ?>"><?= strtoupper($o['status'] ?? 'PENDING') ?></span></td>
+                                <td>
+                                    <?php if($o['status'] == 'pending'): ?>
+                                        <form method="POST" style="display: inline;">
+                                            <input type="hidden" name="id" value="<?= $o['id'] ?>">
+                                            <button type="submit" name="aksi" value="acc" class="btn btn-acc" onclick="return confirm('Konfirmasi pesanan ini sudah dibayar?')">
+                                                <i class="fas fa-check"></i> ACC
+                                            </button>
+                                            <button type="submit" name="aksi" value="tolak" class="btn btn-tolak" onclick="return confirm('Batalkan pesanan ini?')">
+                                                <i class="fas fa-times"></i> Tolak
+                                            </button>
+                                        </form>
+                                    <?php else: ?>
+                                        <span style="color: var(--gray); font-size: 12px;">-</span>
+                                    <?php endif; ?>
+                                </td>
                             </tr>
                             <?php endwhile; ?>
                         </tbody>
